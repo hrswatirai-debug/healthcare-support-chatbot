@@ -1,0 +1,16 @@
+# Secrets
+.env
+
+# Generated artifacts
+data/app.db
+data/app.db-journal
+data/*.db-*
+data/rag_index.pkl
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.DS_Store

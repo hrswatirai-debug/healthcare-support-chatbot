@@ -1,0 +1,47 @@
+# Self-hosted stack: FastAPI engine + n8n orchestrator, co-located on one
+# Docker network so hops stay on localhost (keeps latency within the <2s budget).
+# No paid service, no cloud n8n — data stays on your host (HIPAA-relevant).
+
+services:
+  engine:
+    build: .
+    container_name: chatbot-engine
+    environment:
+      # Pass through your LLM provider key from the host .env
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # Shared secret so only n8n may call the engine
+      - ENGINE_API_KEY=${ENGINE_API_KEY:-change-me}
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"   # exposed for local testing; remove in prod if only n8n calls it
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: chatbot-n8n
+    depends_on:
+      - engine
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=UTC
+      # Made available to workflow HTTP nodes as {{$env.ENGINE_API_KEY}}
+      - ENGINE_API_KEY=${ENGINE_API_KEY:-change-me}
+      # Basic auth on the n8n editor UI
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-change-me}
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+volumes:
+  n8n_data:

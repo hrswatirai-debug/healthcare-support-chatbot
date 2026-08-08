@@ -1,0 +1,16 @@
+# Core
+streamlit>=1.34
+scikit-learn>=1.3
+python-dotenv>=1.0
+
+# API service (orchestrated by n8n)
+fastapi>=0.110
+uvicorn>=0.29
+
+# LLM providers (install only the one you use; all are optional)
+anthropic>=0.34
+openai>=1.30
+google-generativeai>=0.7
+
+# Testing
+pytest>=8.0
