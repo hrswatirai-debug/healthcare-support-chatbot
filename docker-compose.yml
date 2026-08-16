@@ -14,10 +14,15 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       # Shared secret so only n8n may call the engine
       - ENGINE_API_KEY=${ENGINE_API_KEY:-change-me}
+      # Store the SQLite DB on a persistent volume (survives rebuilds).
+      # NOTE: a separate path from /app/data, which holds the seeded docs/schema.
+      - DB_PATH=/data/app.db
     expose:
       - "8000"
     ports:
       - "8000:8000"   # exposed for local testing; remove in prod if only n8n calls it
+    volumes:
+      - engine_data:/data   # persists app.db (history + business data)
     restart: unless-stopped
 
   n8n:
@@ -45,3 +50,4 @@ services:
 
 volumes:
   n8n_data:
+  engine_data:

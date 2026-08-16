@@ -46,19 +46,26 @@ def _dispatch(message: str, client_id: str, intent: str, confidence: float) -> B
     if intent == "unknown":
         return BotResponse(config.FALLBACK_MESSAGE, intent, "FALLBACK", False)
 
-    if intent in config.SQL_INTENTS:
-        try:
-            rows, sql = sql_engine.run(message, client_id)
-            text = sql_engine.narrate(message, rows)
-            answered = bool(rows)
-            return BotResponse(text, intent, "SQL", answered, sql_used=sql)
-        except sql_engine.SQLGuardError:
-            return BotResponse(config.FALLBACK_MESSAGE, intent, "FALLBACK", False)
+    # Route policy/how-to phrasings to documents, lookups to structured data.
+    route = intent_mod.route_for(intent, message)
 
-    if intent in config.RAG_INTENTS:
-        text, sources = rag_engine.answer(message)
-        answered = text.strip() != config.FALLBACK_MESSAGE
-        return BotResponse(text, intent, "RAG" if answered else "FALLBACK",
-                           answered, sources=sources)
+    if route == "SQL":
+        # Fast path: fixed templated query + templated formatting (no LLM calls).
+        rows, sql = sql_engine.run_templated(intent, client_id)
+        if rows:
+            text = sql_engine.format_templated(intent, rows)
+            return BotResponse(text, intent, "SQL", True, sql_used=sql)
+        # Nothing structured to return -> cascade to documents before fallback.
+        return _rag_or_fallback(message, intent)
+
+    if route == "RAG":
+        return _rag_or_fallback(message, intent)
 
     return BotResponse(config.FALLBACK_MESSAGE, intent, "FALLBACK", False)
+
+
+def _rag_or_fallback(message: str, intent: str) -> BotResponse:
+    text, sources = rag_engine.answer(message)
+    answered = text.strip() != config.FALLBACK_MESSAGE
+    return BotResponse(text, intent, "RAG" if answered else "FALLBACK",
+                       answered, sources=sources)

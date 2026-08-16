@@ -21,6 +21,7 @@ import os
 import time
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 import config
@@ -95,9 +96,8 @@ def do_auth(body: AuthIn, x_engine_key: str | None = Header(default=None)):
 def do_intent(body: IntentIn, x_engine_key: str | None = Header(default=None)):
     _check_key(x_engine_key)
     label, confidence = intent_mod.classify(body.message)
-    route = ("SQL" if label in config.SQL_INTENTS
-             else "RAG" if label in config.RAG_INTENTS
-             else "FALLBACK")
+    # Policy/how-to phrasings route to RAG even for structured topics.
+    route = intent_mod.route_for(label, body.message)
     return {"intent": label, "confidence": confidence, "route": route}
 
 
@@ -106,13 +106,16 @@ def do_sql(body: QueryIn, x_engine_key: str | None = Header(default=None)):
     _check_key(x_engine_key)
     if not body.client_id:
         raise HTTPException(status_code=400, detail="client_id required for SQL queries")
-    try:
-        rows, sql = sql_engine.run(body.message, body.client_id)
-    except sql_engine.SQLGuardError:
-        return {"answered": False, "answer": config.FALLBACK_MESSAGE,
-                "rows": [], "sql": None}
-    answer = sql_engine.narrate(body.message, rows)
-    return {"answered": bool(rows), "answer": answer, "rows": rows, "sql": sql}
+    # Fast path: fixed templated query per intent (no LLM generation/narration).
+    intent_label, _ = intent_mod.classify(body.message)
+    rows, sql = sql_engine.run_templated(intent_label, body.client_id)
+    if rows:
+        return {"answered": True,
+                "answer": sql_engine.format_templated(intent_label, rows),
+                "rows": rows, "sql": sql}
+    # No rows -> report unanswered so the workflow can cascade to RAG.
+    return {"answered": False, "answer": config.FALLBACK_MESSAGE,
+            "rows": [], "sql": sql}
 
 
 @app.post("/query/rag")
@@ -165,3 +168,78 @@ def do_events(body: EventIn, x_engine_key: str | None = Header(default=None)):
     # Other event types (complaint_created, escalation, csat) are handled inside
     # n8n workflows; the engine just acknowledges receipt.
     return {"received": True, "type": body.type, "ts": time.time()}
+
+
+def _fetch_history(limit: int, client_id: str | None):
+    """Read recent audit rows from the DB. Read-only."""
+    q = ("SELECT id, ts, client_id, intent, data_source, answered, latency_ms, "
+         "message_preview FROM chat_audit")
+    params: list = []
+    if client_id:
+        q += " WHERE client_id = ?"
+        params.append(client_id)
+    q += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    conn = db.get_readonly_connection()
+    try:
+        return [dict(r) for r in conn.execute(q, params).fetchall()]
+    finally:
+        conn.close()
+
+
+@app.get("/history.json")
+def history_json(limit: int = 50, client_id: str | None = None):
+    """Raw chat history as JSON. Optional ?limit= and ?client_id= filters."""
+    return {"count": None, "rows": _fetch_history(limit, client_id)}
+
+
+@app.get("/history", response_class=HTMLResponse)
+def history_page(limit: int = 50, client_id: str | None = None):
+    """Human-friendly chat-history table you can open in a browser."""
+    rows = _fetch_history(limit, client_id)
+    body_rows = ""
+    for r in rows:
+        answered = "✅" if r["answered"] else "—"
+        src = r["data_source"] or ""
+        badge = {"SQL": "#2a9c68", "RAG": "#3c78d8", "FALLBACK": "#b65775"}.get(src, "#666")
+        body_rows += (
+            "<tr>"
+            f"<td>{r['id']}</td>"
+            f"<td class='mono'>{r['ts']}</td>"
+            f"<td>{r['client_id'] or ''}</td>"
+            f"<td>{r['intent'] or ''}</td>"
+            f"<td><span class='badge' style='background:{badge}'>{src}</span></td>"
+            f"<td style='text-align:center'>{answered}</td>"
+            f"<td style='text-align:right'>{r['latency_ms']} ms</td>"
+            f"<td>{(r['message_preview'] or '')}</td>"
+            "</tr>"
+        )
+    if not rows:
+        body_rows = ("<tr><td colspan='8' style='text-align:center;padding:24px'>"
+                     "No chat history yet. Send a message through the chatbot first."
+                     "</td></tr>")
+    html = f"""<!doctype html><html><head><meta charset="utf-8">
+<title>Chatbot History</title>
+<meta http-equiv="refresh" content="10">
+<style>
+ :root {{ color-scheme: light }}
+ body {{ font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; color:#1a1a1a }}
+ h1 {{ font-size: 20px; margin: 0 0 4px }}
+ .sub {{ color:#666; font-size: 13px; margin-bottom: 16px }}
+ table {{ border-collapse: collapse; width: 100%; font-size: 13px }}
+ th, td {{ padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top }}
+ th {{ background:#fafafa; position: sticky; top: 0; font-weight: 600 }}
+ tr:hover td {{ background:#fafcff }}
+ .mono {{ font-family: ui-monospace, Menlo, monospace; color:#555; white-space: nowrap }}
+ .badge {{ color:#fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight:600 }}
+</style></head><body>
+ <h1>🩺 Chatbot Interaction History</h1>
+ <div class="sub">Showing {len(rows)} most recent turns · auto-refreshes every 10s ·
+   <a href="/history.json">JSON</a></div>
+ <table>
+  <thead><tr><th>#</th><th>Time (UTC)</th><th>Client</th><th>Intent</th>
+   <th>Source</th><th>OK</th><th>Latency</th><th>Message</th></tr></thead>
+  <tbody>{body_rows}</tbody>
+ </table>
+</body></html>"""
+    return html

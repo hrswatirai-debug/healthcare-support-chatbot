@@ -110,6 +110,8 @@ def answer(query: str) -> tuple[str, list[str]]:
 
     context = "\n\n".join(context_parts)
     user = f"QUESTION: {query}\nCONTEXT:\n{context}"
+    # Smaller token budget = faster generation (helps the <2s target). Support
+    # answers are short by design, so 180 tokens is ample.
     text = llm.complete(system=_ANSWER_SYSTEM, user=user, task="rag_answer",
-                        temperature=0.1, max_tokens=400)
+                        temperature=0.1, max_tokens=180)
     return text, sources

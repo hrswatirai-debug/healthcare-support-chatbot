@@ -1,8 +1,17 @@
-"""Intent classification via the LLM, returning one of the fixed categories."""
+"""Intent classification: fast rules-first, LLM fallback for ambiguity.
+
+A high-precision keyword classifier resolves the common, unambiguous phrasings
+with ZERO LLM latency. Only genuinely ambiguous messages fall through to the
+LLM. `route_for()` then decides SQL vs RAG and, crucially, sends policy/how-to
+phrasings to the documents (RAG) even when the topic (e.g. warranty) is
+otherwise a structured-data intent — so "is my warranty active" hits SQL while
+"what warranty comes with new equipment" hits the policy doc.
+"""
 from __future__ import annotations
 
 import json
 
+import config
 from src import llm
 
 INTENTS = [
@@ -18,22 +27,84 @@ INTENTS = [
     "unknown",
 ]
 
+# High-precision keyword rules, evaluated in order (first match wins).
+_RULES = [
+    ("complaint_issue", ["complaint", "ticket", "broken", "not working", "doesn't work",
+                         "won't turn on", "not powering", "fault", "faulty", "breakdown",
+                         "malfunction", "escalate"]),
+    ("order_delivery_status", ["order status", "my order", "delivery", "deliver", "shipment",
+                               "shipped", "tracking", "track my", "arrive", "dispatch",
+                               "in transit", "where is my order"]),
+    ("payment_invoice", ["invoice", "payment", "refund", "overcharge", "receipt",
+                         "credit note", " bill", "amount due", "overdue"]),
+    ("warranty_amc", ["warranty", "amc", "annual maintenance contract", "coverage",
+                      "warranty period"]),
+    ("spare_parts", ["spare part", "spare", "replacement part", "accessory", "probe",
+                     "ecg cable", "in stock", "part availability", "order a part"]),
+    ("installation_maintenance", ["installation", "install ", "schedule", "preventive maintenance",
+                                  "technician visit", "book a", "maintenance visit",
+                                  "service visit"]),
+    ("certifications_compliance", ["iso ", "ce mark", "ce certificate", "fda", "certificate",
+                                   "certification", "compliance", "regulatory", "regulation"]),
+    ("product_specs_docs", ["specification", "specs", "manual", "compatible", "compatibility",
+                            "field strength", "software version", "how do i", "how to",
+                            "clean the", "user manual", "datasheet"]),
+    ("general_query", ["business hours", "opening hours", "contact", "support hours",
+                       "phone number", "email address", "documentation policy", "reach support"]),
+]
+
+# Phrasings that signal a POLICY / document question -> force RAG route.
+_POLICY_SIGNALS = ["policy", "comes with", "come with", "how long", "terms", "what warranty",
+                   "standard warranty", "included with", "new equipment", "how do i", "how to",
+                   "what is the", "what are the", "explain", "process for", "procedure"]
+# Phrasings that signal a personal-record LOOKUP -> keep SQL route.
+_LOOKUP_SIGNALS = ["my ", "our ", "mine", "for my", "i have", "we have", "status of",
+                   "is my", "when does my", "track", "number", " id "]
+
+
+def _rule_match(message: str):
+    text = " " + message.lower().strip() + " "
+    for intent, kws in _RULES:
+        if any(k in text for k in kws):
+            return intent
+    return None
+
+
+def classify(message: str) -> tuple[str, float]:
+    """Rules-first; fall back to the LLM only when no rule matches."""
+    hit = _rule_match(message)
+    if hit:
+        return hit, 0.95
+    return _llm_classify(message)
+
+
+def route_for(intent: str, message: str) -> str:
+    """Decide SQL | RAG | FALLBACK. Policy/how-to phrasings go to documents."""
+    if intent == "unknown":
+        return "FALLBACK"
+    if intent in config.RAG_INTENTS:
+        return "RAG"
+    if intent in config.SQL_INTENTS:
+        text = " " + message.lower() + " "
+        policy = any(s in text for s in _POLICY_SIGNALS)
+        lookup = any(s in text for s in _LOOKUP_SIGNALS)
+        if policy and not lookup:
+            return "RAG"
+        return "SQL"
+    return "FALLBACK"
+
+
+# --------------------------------------------------------------------------- #
+# LLM fallback (used only for ambiguous messages the rules can't resolve)
+# --------------------------------------------------------------------------- #
 _SYSTEM = (
     "You are an intent classifier for a medical-equipment customer-support "
     "chatbot. Classify the user's message into exactly one intent. "
     "Respond with STRICT JSON only: {\"intent\": <one of the labels>, "
     "\"confidence\": <0..1>}. No prose.\n\n"
-    "Labels and meaning:\n"
-    "- order_delivery_status: order tracking, delivery dates, delays, damage.\n"
-    "- product_specs_docs: technical specs, manuals, compatibility, how-to.\n"
-    "- installation_maintenance: schedule install, preventive maintenance, technician visit.\n"
-    "- warranty_amc: warranty period, AMC enrollment/coverage/status, extensions.\n"
-    "- complaint_issue: log faults/breakdowns, track ticket, escalate.\n"
-    "- payment_invoice: invoices, receipts, overcharges, refunds, credit notes.\n"
-    "- spare_parts: spare-part availability, replacements, accessory compatibility.\n"
-    "- certifications_compliance: ISO/CE/FDA certificates, regulatory compliance.\n"
-    "- general_query: business hours, contact options, documentation policy.\n"
-    "- unknown: anything not covered above.\n"
+    "Labels: order_delivery_status, product_specs_docs, installation_maintenance, "
+    "warranty_amc, complaint_issue, payment_invoice, spare_parts, "
+    "certifications_compliance, general_query, unknown."
 )
 
 _FEWSHOT = (
@@ -47,7 +118,7 @@ _FEWSHOT = (
 )
 
 
-def classify(message: str) -> tuple[str, float]:
+def _llm_classify(message: str) -> tuple[str, float]:
     raw = llm.complete(
         system=_SYSTEM,
         user=_FEWSHOT + "\nMessage: " + message + " ->",
@@ -68,7 +139,6 @@ def _parse(raw: str) -> tuple[str, float]:
         data = json.loads(raw[start:end])
         return str(data.get("intent", "unknown")), float(data.get("confidence", 0.0))
     except Exception:
-        # last-ditch: match a bare label
         for label in INTENTS:
             if label in raw:
                 return label, 0.5

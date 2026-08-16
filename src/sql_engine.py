@@ -120,3 +120,121 @@ def narrate(message: str, rows: list[dict]) -> str:
     user = f"QUESTION: {message}\nCONTEXT:\n{context}"
     return llm.complete(system=_ANSWER_SYSTEM, user=user, task="sql_answer",
                         temperature=0.1, max_tokens=300)
+
+
+# --------------------------------------------------------------------------- #
+# Fast path: deterministic templated queries + formatting (NO LLM calls).
+# Each structured intent maps to one fixed, client-scoped, read-only query.
+# This is faster (no generation call, no narration call) and safer/more
+# accurate than LLM-generated SQL — every query is auditable and identical
+# each run. Used for the <2s latency target; LLM `run()` above remains as a
+# fallback for open-ended questions.
+# --------------------------------------------------------------------------- #
+TEMPLATED_QUERIES = {
+    "order_delivery_status":
+        "SELECT order_id, status, est_delivery, tracking_no, order_date "
+        "FROM orders WHERE client_id = :client_id ORDER BY order_date DESC",
+    "warranty_amc":
+        "SELECT contract_id, equipment_id, warranty_start, warranty_end, "
+        "amc_plan, amc_status, amc_end FROM warranty_amc "
+        "WHERE client_id = :client_id",
+    "complaint_issue":
+        "SELECT ticket_id, subject, priority, status, created_at "
+        "FROM complaints WHERE client_id = :client_id ORDER BY created_at DESC",
+    "payment_invoice":
+        "SELECT invoice_id, amount_usd, status, due_date, issued_date "
+        "FROM invoices WHERE client_id = :client_id ORDER BY issued_date DESC",
+    "spare_parts":
+        "SELECT part_id, part_name, in_stock, unit_price_usd, lead_time_days "
+        "FROM spare_parts ORDER BY part_name",
+}
+
+
+def _sanitize(v) -> str:
+    """Defensive input hygiene: strip whitespace and a stray leading '=' or
+    quotes that upstream clients (e.g. an n8n expression field) may prepend."""
+    if v is None:
+        return ""
+    return str(v).strip().lstrip("=").strip().strip('"\'').strip()
+
+
+def run_templated(intent: str, client_id: str):
+    """Execute the fixed query for a structured intent. Returns (rows, sql).
+
+    Returns (None, None) if the intent has no template.
+    """
+    sql = TEMPLATED_QUERIES.get(intent)
+    if not sql:
+        return None, None
+    client_id = _sanitize(client_id)
+    conn = db.get_readonly_connection()
+    try:
+        cur = conn.execute(sql, {"client_id": client_id})
+        rows = [dict(r) for r in cur.fetchmany(config.SQL_MAX_ROWS)]
+    finally:
+        conn.close()
+    return rows, sql
+
+
+def _money(v) -> str:
+    try:
+        return f"${float(v):,.0f}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def format_templated(intent: str, rows: list[dict]) -> str | None:
+    """Turn rows into a concise natural-language answer, no LLM needed."""
+    if not rows:
+        return None
+
+    if intent == "order_delivery_status":
+        items = []
+        for r in rows:
+            s = f"{r['order_id']} — {r['status']}"
+            if r.get("est_delivery"):
+                s += f", ETA {r['est_delivery']}"
+            if r.get("tracking_no"):
+                s += f" (tracking {r['tracking_no']})"
+            items.append(s)
+        return "Here are your orders: " + "; ".join(items) + "."
+
+    if intent == "warranty_amc":
+        items = []
+        for r in rows:
+            s = str(r.get("equipment_id", ""))
+            if r.get("warranty_end"):
+                s += f" — warranty until {r['warranty_end']}"
+            plan, status = r.get("amc_plan"), r.get("amc_status")
+            if plan and plan != "None":
+                s += f", AMC {plan} ({status})"
+                if r.get("amc_end"):
+                    s += f" until {r['amc_end']}"
+            else:
+                s += ", no AMC enrolled"
+            items.append(s)
+        return "Your warranty & AMC coverage: " + "; ".join(items) + "."
+
+    if intent == "complaint_issue":
+        items = [f"{r['ticket_id']} — \"{r['subject']}\" — {r['priority']} — {r['status']}"
+                 for r in rows]
+        return "Your support tickets: " + "; ".join(items) + "."
+
+    if intent == "payment_invoice":
+        items = []
+        for r in rows:
+            s = f"{r['invoice_id']} — {_money(r.get('amount_usd'))} — {r['status']}"
+            if r.get("due_date"):
+                s += f" (due {r['due_date']})"
+            items.append(s)
+        return "Your invoices: " + "; ".join(items) + "."
+
+    if intent == "spare_parts":
+        items = []
+        for r in rows:
+            stock = f"{r['in_stock']} in stock" if r.get("in_stock") else "out of stock"
+            items.append(f"{r['part_name']} ({r['part_id']}) — {stock}, "
+                         f"{_money(r.get('unit_price_usd'))}, lead time {r['lead_time_days']}d")
+        return "Spare parts availability: " + "; ".join(items) + "."
+
+    return None
