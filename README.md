@@ -1,5 +1,12 @@
 # AI-Powered Customer Support Chatbot — Healthcare Equipment (RAG + SQL)
 
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-engine-009688?logo=fastapi&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit&logoColor=white)
+![n8n](https://img.shields.io/badge/n8n-orchestration-EA4B71?logo=n8n&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-12%2F12%20passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 A real-time, chat-only customer-support assistant for a medical-equipment
 manufacturer. It verifies the customer's identity, detects intent, and answers
 by routing each question to either a **SQL** database (structured facts like
