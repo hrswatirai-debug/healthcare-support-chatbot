@@ -1,0 +1,33 @@
+{
+  "description": "Labeled evaluation set for the healthcare support chatbot. Each case has the expected intent, route (SQL/RAG/FALLBACK), and for SQL an expected substring in the answer, or for RAG an expected source document. Grounded in data/seed.sql.",
+  "cases": [
+    {"id": "sql-order-1", "message": "What is my order status?", "client_id": "CLI-1001", "category": "sql", "expect_intent": "order_delivery_status", "expect_route": "SQL", "expect_contains": ["ORD-4402"]},
+    {"id": "sql-order-2", "message": "Track my delivery please", "client_id": "CLI-1002", "category": "sql", "expect_intent": "order_delivery_status", "expect_route": "SQL", "expect_contains": ["ORD-44"]},
+    {"id": "sql-order-3", "message": "Where is my order?", "client_id": "CLI-1003", "category": "sql", "expect_intent": "order_delivery_status", "expect_route": "SQL", "expect_contains": ["ORD-4405"]},
+    {"id": "sql-warranty-1", "message": "Is my warranty active?", "client_id": "CLI-1001", "category": "sql", "expect_intent": "warranty_amc", "expect_route": "SQL", "expect_contains": ["Premium"]},
+    {"id": "sql-warranty-2", "message": "Check my AMC status", "client_id": "CLI-1002", "category": "sql", "expect_intent": "warranty_amc", "expect_route": "SQL", "expect_contains": ["Basic"]},
+    {"id": "sql-complaint-1", "message": "Show my open complaints", "client_id": "CLI-1001", "category": "sql", "expect_intent": "complaint_issue", "expect_route": "SQL", "expect_contains": ["TIC-7001"]},
+    {"id": "sql-complaint-2", "message": "My monitors won't turn on, this is a breakdown", "client_id": "CLI-1002", "category": "sql", "expect_intent": "complaint_issue", "expect_route": "SQL", "expect_contains": ["TIC-7002"]},
+    {"id": "sql-invoice-1", "message": "Can I see my invoices?", "client_id": "CLI-1001", "category": "sql", "expect_intent": "payment_invoice", "expect_route": "SQL", "expect_contains": ["INV-300"]},
+    {"id": "sql-invoice-2", "message": "Show my invoice payment status", "client_id": "CLI-1002", "category": "sql", "expect_intent": "payment_invoice", "expect_route": "SQL", "expect_contains": ["INV-3003"]},
+    {"id": "sql-spare-1", "message": "Which spare parts are in stock?", "client_id": "CLI-1001", "category": "sql", "expect_intent": "spare_parts", "expect_route": "SQL", "expect_contains": ["Cooling Pump"]},
+    {"id": "sql-spare-2", "message": "I want to order a replacement part", "client_id": "CLI-1002", "category": "sql", "expect_intent": "spare_parts", "expect_route": "SQL", "expect_contains": ["SP-2"]},
+
+    {"id": "rag-warranty-policy-1", "message": "What warranty comes with new equipment?", "client_id": "CLI-1002", "category": "rag", "expect_intent": "warranty_amc", "expect_route": "RAG", "expect_source": "warranty_amc_policy.md"},
+    {"id": "rag-warranty-policy-2", "message": "How long is the standard warranty period?", "client_id": "CLI-1001", "category": "rag", "expect_intent": "warranty_amc", "expect_route": "RAG", "expect_source": "warranty_amc_policy.md"},
+    {"id": "rag-install-1", "message": "How do I book preventive maintenance?", "client_id": "CLI-1001", "category": "rag", "expect_intent": "installation_maintenance", "expect_route": "RAG", "expect_source": "installation_maintenance_sop.md"},
+    {"id": "rag-install-2", "message": "How do I schedule an installation?", "client_id": "CLI-1002", "category": "rag", "expect_intent": "installation_maintenance", "expect_route": "RAG", "expect_source": "installation_maintenance_sop.md"},
+    {"id": "rag-spec-1", "message": "What is the field strength of the MagnaScan MRI?", "client_id": "CLI-1001", "category": "rag", "expect_intent": "product_specs_docs", "expect_route": "RAG", "expect_source": "mri_scanner_manual.md"},
+    {"id": "rag-spec-2", "message": "How do I clean the MRI scanner?", "client_id": "CLI-1001", "category": "rag", "expect_intent": "product_specs_docs", "expect_route": "RAG", "expect_source": "mri_scanner_manual.md"},
+    {"id": "rag-spec-3", "message": "What software version does the ClariCT scanner use?", "client_id": "CLI-1003", "category": "rag", "expect_intent": "product_specs_docs", "expect_route": "RAG", "expect_source": "ct_scanner_manual.md"},
+    {"id": "rag-cert-1", "message": "Can you send the FDA certificate?", "client_id": "CLI-1001", "category": "rag", "expect_intent": "certifications_compliance", "expect_route": "RAG", "expect_source": "certifications_compliance.md"},
+    {"id": "rag-cert-2", "message": "Is the equipment ISO 13485 certified?", "client_id": "CLI-1002", "category": "rag", "expect_intent": "certifications_compliance", "expect_route": "RAG", "expect_source": "certifications_compliance.md"},
+    {"id": "rag-general-1", "message": "What are your business hours?", "client_id": "CLI-1001", "category": "rag", "expect_intent": "general_query", "expect_route": "RAG", "expect_source": "general_support_faq.md"},
+    {"id": "rag-general-2", "message": "What are the support contact options?", "client_id": "CLI-1002", "category": "rag", "expect_intent": "general_query", "expect_route": "RAG", "expect_source": "general_support_faq.md"},
+    {"id": "rag-refund-policy", "message": "How long do refunds usually take?", "client_id": "CLI-1001", "category": "rag", "expect_intent": "payment_invoice", "expect_route": "RAG", "expect_source": "general_support_faq.md"},
+
+    {"id": "fallback-1", "message": "What is the capital of Mars?", "client_id": "CLI-1001", "category": "fallback", "expect_intent": "unknown", "expect_route": "FALLBACK"},
+    {"id": "fallback-2", "message": "Tell me a joke about penguins", "client_id": "CLI-1002", "category": "fallback", "expect_intent": "unknown", "expect_route": "FALLBACK"},
+    {"id": "fallback-3", "message": "asdkjfh qwoieu zxcmnv", "client_id": "CLI-1003", "category": "fallback", "expect_intent": "unknown", "expect_route": "FALLBACK"}
+  ]
+}

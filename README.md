@@ -87,6 +87,23 @@ python -m pytest -q
 python tests/test_system.py
 ```
 
+## Evaluation (measured metrics)
+
+The capstone targets (90%+ intent, 95%+ SQL, 90%+ RAG, <2s) are **measured**, not
+assumed, by a labeled harness in `eval/`:
+
+```bash
+python eval/run_eval.py                         # offline, deterministic, free
+LLM_PROVIDER=openai python eval/run_eval.py      # measure with your real model
+```
+
+It runs `eval/eval_dataset.json` (26 labeled cases spanning all 9 intents, SQL
+lookups, RAG policy/how-to, and unanswerable questions) through the real
+pipeline and writes `eval/EVAL_REPORT.md` with a scored table plus per-case
+detail. Intent, routing, SQL, and fallback are deterministic (rules + templated
+queries) so those numbers hold in any mode; RAG retrieval precision checks that
+the correct source document is retrieved. Add cases to the JSON to grow coverage.
+
 ## Project layout
 ```
 healthcare-support-chatbot/
