@@ -100,6 +100,16 @@ CREATE TABLE IF NOT EXISTS chat_audit (
     message_preview TEXT
 );
 
+-- Error log: workflow / pipeline failures (written by the n8n error handler) --
+CREATE TABLE IF NOT EXISTS error_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT NOT NULL,
+    workflow        TEXT,
+    failed_node     TEXT,
+    error_message   TEXT,
+    execution_url   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_client   ON orders(client_id);
 CREATE INDEX IF NOT EXISTS idx_warranty_client ON warranty_amc(client_id);
 CREATE INDEX IF NOT EXISTS idx_complaints_client ON complaints(client_id);

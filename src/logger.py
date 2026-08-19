@@ -40,3 +40,25 @@ def log_interaction(client_id: str | None, intent: str | None, data_source: str,
         conn.commit()
     finally:
         conn.close()
+
+
+def log_error(payload: dict) -> None:
+    """Persist a workflow/pipeline failure (posted by the n8n error handler)."""
+    conn = db.get_write_connection()
+    try:
+        conn.execute(
+            "INSERT INTO error_log "
+            "(ts, workflow, failed_node, error_message, execution_url) "
+            "VALUES (?,?,?,?,?)",
+            (
+                payload.get("timestamp")
+                or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                payload.get("workflow"),
+                payload.get("failed_node"),
+                payload.get("error_message"),
+                payload.get("execution_url"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()

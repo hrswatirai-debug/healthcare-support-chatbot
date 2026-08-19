@@ -165,6 +165,9 @@ def do_events(body: EventIn, x_engine_key: str | None = Header(default=None)):
             message=p.get("message", ""),
         )
         return {"logged": True}
+    if body.type == "error":
+        logger.log_error(body.payload)
+        return {"logged": True}
     # Other event types (complaint_created, escalation, csat) are handled inside
     # n8n workflows; the engine just acknowledges receipt.
     return {"received": True, "type": body.type, "ts": time.time()}
@@ -191,6 +194,68 @@ def _fetch_history(limit: int, client_id: str | None):
 def history_json(limit: int = 50, client_id: str | None = None):
     """Raw chat history as JSON. Optional ?limit= and ?client_id= filters."""
     return {"count": None, "rows": _fetch_history(limit, client_id)}
+
+
+def _fetch_errors(limit: int):
+    conn = db.get_readonly_connection()
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT id, ts, workflow, failed_node, error_message, execution_url "
+            "FROM error_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
+    finally:
+        conn.close()
+
+
+@app.get("/errors.json")
+def errors_json(limit: int = 50):
+    return {"rows": _fetch_errors(limit)}
+
+
+@app.get("/errors", response_class=HTMLResponse)
+def errors_page(limit: int = 50):
+    """Queryable error log — failures posted by the n8n error handler."""
+    rows = _fetch_errors(limit)
+    parts = []
+    for r in rows:
+        url = r["execution_url"]
+        link = f'<a href="{url}">open</a>' if url else ""
+        parts.append(
+            "<tr>"
+            f"<td>{r['id']}</td>"
+            f"<td class='mono'>{r['ts']}</td>"
+            f"<td>{r['workflow'] or ''}</td>"
+            f"<td>{r['failed_node'] or ''}</td>"
+            f"<td>{r['error_message'] or ''}</td>"
+            f"<td>{link}</td>"
+            "</tr>"
+        )
+    body_rows = "".join(parts)
+    if not rows:
+        body_rows = ("<tr><td colspan='6' style='text-align:center;padding:24px'>"
+                     "No errors logged. \U0001F389</td></tr>")
+    html = f"""<!doctype html><html><head><meta charset="utf-8">
+<title>Error Log</title><meta http-equiv="refresh" content="15">
+<style>
+ :root {{ color-scheme: light }}
+ body {{ font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; color:#1a1a1a }}
+ h1 {{ font-size: 20px; margin: 0 0 4px }}
+ .sub {{ color:#666; font-size: 13px; margin-bottom: 16px }}
+ table {{ border-collapse: collapse; width: 100%; font-size: 13px }}
+ th, td {{ padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top }}
+ th {{ background:#fff5f5; font-weight: 600 }}
+ tr:hover td {{ background:#fffafa }}
+ .mono {{ font-family: ui-monospace, Menlo, monospace; color:#555; white-space: nowrap }}
+</style></head><body>
+ <h1>\U0001F6A8 Error Log</h1>
+ <div class="sub">Showing {len(rows)} most recent failures · auto-refreshes every 15s ·
+   <a href="/errors.json">JSON</a> · <a href="/history">chat history</a></div>
+ <table>
+  <thead><tr><th>#</th><th>Time (UTC)</th><th>Workflow</th><th>Failed node</th>
+   <th>Error</th><th>Execution</th></tr></thead>
+  <tbody>{body_rows}</tbody>
+ </table>
+</body></html>"""
+    return html
 
 
 @app.get("/history", response_class=HTMLResponse)
